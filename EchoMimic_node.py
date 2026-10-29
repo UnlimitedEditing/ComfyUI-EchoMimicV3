@@ -187,8 +187,12 @@ class Echo_Predata:
         audio_file_prefix = ''.join(random.choice("0123456789") for _ in range(6))
         audio_file = os.path.join(folder_paths.get_input_directory(), f"audio_{audio_file_prefix}_temp.wav")
         buff = io_base.BytesIO()
-   
-        torchaudio.save(buff, audio["waveform"].squeeze(0), audio["sample_rate"], format="FLAC")
+        wave = audio["waveform"].squeeze(0)  # [channels, samples]
+        try:
+            import soundfile as sf  # torchaudio >= 2.9 needs the torchcodec package for save(); soundfile has no such dependency
+            sf.write(buff, wave.t().float().cpu().numpy(), int(audio["sample_rate"]), format="FLAC")
+        except ImportError:
+            torchaudio.save(buff, wave, audio["sample_rate"], format="FLAC")
         with open(audio_file, 'wb') as f:
             f.write(buff.getbuffer())
 
