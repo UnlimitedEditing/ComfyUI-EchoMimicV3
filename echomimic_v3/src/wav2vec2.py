@@ -16,6 +16,26 @@ def get_mask_from_lengths(lengths, max_len=None):
     return mask
 
 
+def _manual_hidden_states(encoder, hidden_states):
+    """All per-layer hidden states of a Wav2Vec2 encoder (no padding mask), as the transformers 4.x
+    encoder returned them. transformers 5.x records them with hooks on the TOP-LEVEL model only, so
+    calling `self.encoder(..., output_hidden_states=True)` from this custom forward yields None."""
+    stable = getattr(encoder.config, "do_stable_layer_norm", False)
+    hidden_states = hidden_states + encoder.pos_conv_embed(hidden_states)
+    if not stable:
+        hidden_states = encoder.layer_norm(hidden_states)
+    hidden_states = encoder.dropout(hidden_states)
+    collected = []
+    for layer in encoder.layers:
+        collected.append(hidden_states)
+        out = layer(hidden_states)
+        hidden_states = out[0] if isinstance(out, (tuple, list)) else out
+    if stable:
+        hidden_states = encoder.layer_norm(hidden_states)
+    collected.append(hidden_states)
+    return hidden_states, tuple(collected)
+
+
 def linear_interpolation(features, seq_len):
     features = features.transpose(1, 2)
     output_features = F.interpolate(features, size=seq_len, align_corners=True, mode='linear')
@@ -61,6 +81,7 @@ class Wav2Vec2Model(Wav2Vec2Model):
             hidden_states, mask_time_indices=mask_time_indices, attention_mask=attention_mask
         )
 
+        input_to_encoder = hidden_states
         encoder_outputs = self.encoder(
             hidden_states,
             attention_mask=attention_mask,
@@ -70,6 +91,9 @@ class Wav2Vec2Model(Wav2Vec2Model):
         )
 
         hidden_states = encoder_outputs[0]
+        all_hidden = getattr(encoder_outputs, "hidden_states", None)
+        if output_hidden_states and all_hidden is None and attention_mask is None:
+            hidden_states, all_hidden = _manual_hidden_states(self.encoder, input_to_encoder)
 
         if self.adapter is not None:
             hidden_states = self.adapter(hidden_states)
@@ -78,8 +102,8 @@ class Wav2Vec2Model(Wav2Vec2Model):
             return (hidden_states, ) + encoder_outputs[1:]
         return BaseModelOutput(
             last_hidden_state=hidden_states,
-            hidden_states=encoder_outputs.hidden_states,
-            attentions=encoder_outputs.attentions,
+            hidden_states=all_hidden,
+            attentions=getattr(encoder_outputs, "attentions", None),
         )
 
 
