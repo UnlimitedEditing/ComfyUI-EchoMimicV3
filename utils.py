@@ -20,8 +20,18 @@ except:
     except:
         from moviepy import *
 import random
-from .src.utils.mp_utils  import LMKExtractor
-from .src.utils.motion_utils import motion_sync
+try:
+    from .src.utils.mp_utils  import LMKExtractor
+    from .src.utils.motion_utils import motion_sync
+except Exception as _mp_err:  # mediapipe >= 0.10.30 dropped `solutions`; only V1/V2 motion-sync needs it
+    print(f"[EchoMimic] mediapipe motion-sync unavailable ({_mp_err}); V3 / V3_flash are unaffected")
+    _mp_msg = f"mediapipe/skimage/IPython import failed: {_mp_err}"
+
+    def LMKExtractor(*args, **kwargs):
+        raise ImportError(_mp_msg)
+
+    def motion_sync(*args, **kwargs):
+        raise ImportError(_mp_msg)
 from .src.utils.util import save_videos_grid, crop_and_pad,crop_and_pad_rectangle,center_crop
 from .echomimic_v2.src.utils.dwpose_util import draw_pose_select_v2
 
